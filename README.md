@@ -5,6 +5,7 @@
 This repository contains **source code only**. No malware binaries are included.
 
 From [Crypter.Cloud](https://Crypter.Cloud) and [@CrypterGateway](https://t.me/CrypterGateway)
+# [Crypter.Cloud](https://Crypter.Cloud) has 100% support for PureRAT ([scans](https://Crypter.Cloud/scans))
 
 ## Download Full Kit
 
