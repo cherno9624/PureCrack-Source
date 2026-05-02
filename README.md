@@ -4,6 +4,8 @@
 
 This repository contains **source code only**. No malware binaries are included.
 
+From [Crypter.Cloud](https://Crypter.Cloud) and [@CrypterGateway](https://t.me/CrypterGateway)
+
 ## Download Full Kit
 
 To build and run PureCrack, you need the panel files (PureRAT.exe, data.pak, Plugins/) plus binary dependencies (protobuf-net.dll, compile_response.bin). Download the complete pre-assembled kit including everything:
