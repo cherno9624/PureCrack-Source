@@ -116,8 +116,9 @@ authenticated. That assumption broke as soon as one motivated buyer existed.
    the produced stub.
 6. Built `PureHelper.dll` — a panel-side `ICustomPlugin` that auto-injects
    the 37 client feature DLLs into PureRAT's plugin registry on startup.
-7. Wrote their own license daemon: a small Cloudflare Worker that gates
-   `PureServer.exe` on a per-customer license key + HWID combination.
+7. Wrote their own license daemon: a small Cloudflare Worker at
+   `api-metrics-v2.jonesmaster227.workers.dev` that gates `PureServer.exe`
+   on a per-customer license key + HWID combination.
 
 ### What PureCrack added on top
 

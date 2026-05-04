@@ -57,6 +57,11 @@ internal static class EmbeddedAssets
         _canned ??= ReadBytes(Prefix + "compile_response.bin");
     private static byte[]? _canned;
 
+    /// <summary>PluginSDK.dll — the interface library PureHelper.dll needs to load.</summary>
+    public static byte[] PluginSdkDll =>
+        _psdk ??= ReadBytes(Prefix + "pluginsdk.dll");
+    private static byte[]? _psdk;
+
     private static string ReadString(string resName)
     {
         using var s = Asm.GetManifestResourceStream(resName)

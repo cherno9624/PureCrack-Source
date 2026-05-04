@@ -33,6 +33,12 @@ public sealed class TlsRelay : IDisposable
     private readonly IPAddress _boundAddress;
     private Thread? _acceptThread;
     private int _requestCount;
+    private int _dynamicBuildCount;
+
+    /// <summary>Total requests processed since relay started.</summary>
+    public int RequestCount => Volatile.Read(ref _requestCount);
+    /// <summary>Dynamic (Roslyn) builds completed.</summary>
+    public int DynamicBuildCount => Volatile.Read(ref _dynamicBuildCount);
 
     /// <summary>Default port — :443, what the panel hits via the hosts redirect.</summary>
     public const int DefaultPort = 443;
@@ -210,6 +216,9 @@ public sealed class TlsRelay : IDisposable
 
             var (responsePb, label) = Route(path, pt, remoteEp);
             Log.Bullet($"resp: {label} ({responsePb.Length}b)");
+
+            if (label == "compile-dynamic")
+                Interlocked.Increment(ref _dynamicBuildCount);
 
             SendResponse(ssl, responsePb);
             Log.Ok($"sent {label}");

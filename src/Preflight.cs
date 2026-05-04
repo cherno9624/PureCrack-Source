@@ -41,14 +41,14 @@ public static class Preflight
         //    relay from a previous session) will block the bind. We bind+close
         //    briefly to test, then look up the holding process via netstat
         //    so the operator gets an actionable error message.
-        if (!IsTcpPortFree(Program.RelayPort))
+        if (!IsTcpPortFree(KitPorts.Relay))
         {
-            var holder = LookupTcpListenerHolder(Program.RelayPort);
+            var holder = LookupTcpListenerHolder(KitPorts.Relay);
             var who = holder ?? "another process";
             var killHint = holder != null && holder.StartsWith("PID ")
                 ? $" (taskkill /F /PID {holder.Substring(4).Split(' ')[0]} to stop it)"
                 : "";
-            r.Problems.Add($":{Program.RelayPort} is already bound by {who}{killHint}");
+            r.Problems.Add($":{KitPorts.Relay} is already bound by {who}{killHint}");
         }
 
         // 3. Hosts file writable? We need to add api*.purecoder.io entries.

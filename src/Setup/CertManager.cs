@@ -215,7 +215,10 @@ public static class CertManager
         var output = new byte[DpapiMagic.Length + encrypted.Length];
         System.Text.Encoding.ASCII.GetBytes(DpapiMagic, 0, DpapiMagic.Length, output, 0);
         Buffer.BlockCopy(encrypted, 0, output, DpapiMagic.Length, encrypted.Length);
-        File.WriteAllBytes(path, output);
+
+        // Atomic write so a crash mid-write can never leave a partially
+        // written PFX that would be unreadable on next launch.
+        AtomicFile.WriteAllBytes(path, output);
     }
 
     private static byte[] ReadProtectedPfx(string path)

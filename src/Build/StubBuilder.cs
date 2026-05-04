@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using PureCrack.Crypto;
@@ -66,7 +67,45 @@ public static class StubBuilder
         var outer = CompileOuterExe(loaderSrc, encrypted, EmbeddedAssets.ProtobufNetDll);
 
         Log.Ok($"build done in {sw.Elapsed.TotalSeconds:F1}s — outer.exe = {outer.Length:N0}b");
+        RunPostBuildCleanup();
         return outer;
+    }
+
+    // ------------------------------------------------------------------------
+    // Post-build memory cleanup
+    // ------------------------------------------------------------------------
+    //
+    // WHY this exists (the "random crash after N builds" bug):
+    //
+    // Roslyn's CSharpCompilation allocates heavily on the Large Object Heap.
+    // NET Framework 4.x NEVER compacts the LOH automatically — fragmentation
+    // is permanent. After a few builds the LOH resembles Swiss cheese; the
+    // next allocation fails with OutOfMemoryException even though total free
+    // memory is ample. The crash looks random because it depends on how many
+    // builds the operator has done, the sizes of the built stubs, and the
+    // fragmentation pattern that happened to develop.
+    //
+    // The fix: force a full blocking GC with LOH compaction after every build.
+    // CompactOnce tells the GC to compact the LOH during this GC cycle then
+    // reset to default. The double-collect pattern ensures objects that became
+    // unreachable only after finalizers ran (e.g., Roslyn's internal native
+    // resource wrappers) are also cleaned up.
+
+    private static void RunPostBuildCleanup()
+    {
+        try
+        {
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+        catch
+        {
+            // Best-effort — if GC settings are somehow unavailable, the build
+            // still succeeded and the operator gets their stub. The crash will
+            // just come after more builds instead of being prevented.
+        }
     }
 
     // ------------------------------------------------------------------------

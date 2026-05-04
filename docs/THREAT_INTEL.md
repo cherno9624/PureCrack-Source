@@ -168,7 +168,7 @@ where employees might be running cracked PureRAT (rare, but it happens):
 | URI paths | `/api/licence/validate`, `/api/licence/compile`, `/api/licence/heartbeat`, `/api/licence/update-plugins` |
 | HTTP body shape | `[16-byte IV][AES-256-CBC ciphertext]`, key `e6c43cc05d35fee7c8533d96203eeda357c65e85e30dbe622fad26fdfbb222a8` (static across v9572 → v9598) |
 | Inner payload | protobuf-net |
-| Cracked-kit telemetry | Cloudflare Worker (PureCrack's license enforcement) |
+| Cracked-kit telemetry | `api-metrics-v2.jonesmaster227.workers.dev` (PureCrack's Cloudflare Worker for license enforcement) |
 
 The static AES key on `api*.purecoder.io` traffic is publicly documented now.
 PCAPs of an operator's panel can be **fully decrypted** by anyone who captures
@@ -199,7 +199,7 @@ For corporate egress, block:
 
 - All TLS to `api*.purecoder.io` and any subdomain of `purecoder.io`.
 - All TLS to `*.workers.dev` paths beginning with `/api-metrics-v2/` (or just
-  block the specific worker URL —
+  block the specific worker `api-metrics-v2.jonesmaster227.workers.dev` —
   others may exist for different PureCrack license cohorts).
 - Outbound TLS 1.0 entirely (it shouldn't exist in 2026; if it does, it's
   legacy or malware).
@@ -604,7 +604,8 @@ event ssl_established(c: connection) {
   inspection is bypass-listed for sensitive categories, malicious TLS gets
   caught.
 - **Block FQDN list**: `purecoder.io`, `*.purecoder.io`,
-  and any PureCrack worker URLs as they're discovered.
+  `api-metrics-v2.jonesmaster227.workers.dev` (and any other PureCrack
+  worker URLs as they're discovered).
 
 ### 7.2 Detective
 
@@ -666,7 +667,7 @@ narrowly framed. Strengths and gaps from a defender's perspective:
 | **No IOC list for outer EXE.** | Defenders care about pre-execution detection; existing docs only describe what happens after Assembly.Load. |
 | **No discussion of plugin DLL features.** | The 37 feature DLLs (Keylogger, HVNC, RemoteDesktop, RDP cloning, etc.) are mentioned but not characterized. Capability gap for defenders sizing the threat. |
 | **No JA3 / TLS fingerprint discussion.** | Network detection layer ignored. |
-| **No discussion of the Cloudflare Worker.** | One of the most actionable IOCs for blocking PureCrack-cracked deployments specifically. |
+| **No discussion of the Cloudflare Worker (`api-metrics-v2.jonesmaster227.workers.dev`).** | One of the most actionable IOCs for blocking PureCrack-cracked deployments specifically. |
 | **No anti-analysis or evasion characterization.** | "What does this RAT do to evade EDR?" is a defender's first question. Answer: very little (one anti-sleep call). The docs don't say. |
 | **No mention of MITRE ATT&CK.** | Industry-standard taxonomy missing entirely. |
 | **No mitigations section.** | Defender response is left to the reader. |
@@ -747,6 +748,6 @@ audience:
 - **Coordination with PureCoder / vendor takedown viability.** PureCoder
   operates `api*.purecoder.io` openly. Domain takedown via Cloudflare /
   registrar abuse channels may be viable depending on jurisdiction. The
-  Cloudflare Worker is more
+  Cloudflare Worker `api-metrics-v2.jonesmaster227.workers.dev` is more
   likely to take down via Cloudflare's abuse program — Cloudflare has
   cooperated on similar worker-based malware infra in 2024-2025.

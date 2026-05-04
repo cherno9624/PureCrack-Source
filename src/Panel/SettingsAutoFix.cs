@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using PureCrack.Util;
@@ -144,7 +145,9 @@ public static class SettingsAutoFix
         // had non-loopback-first IPs (the only path that calls ToJsonString in
         // ReorderIps), which is why it looked random.
         var output = obj.ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true });
-        try { File.WriteAllText(settingsPath, output); }
+        // Atomic write — a crash mid-write would leave Settings.json corrupt
+        // and the panel unable to start.
+        try { AtomicFile.WriteAllText(settingsPath, output); }
         catch (Exception ex)
         {
             Log.Err($"settings: write failed: {ex.Message}");
@@ -336,7 +339,9 @@ public static class SettingsAutoFix
         // had non-loopback-first IPs (the only path that calls ToJsonString in
         // ReorderIps), which is why it looked random.
         var output = obj.ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true });
-        try { File.WriteAllText(settingsPath, output); }
+        // Atomic write — a crash mid-write would leave Settings.json corrupt
+        // and the panel unable to start.
+        try { AtomicFile.WriteAllText(settingsPath, output); }
         catch (Exception ex)
         {
             Log.Err($"plugin-fix: write failed: {ex.Message}");
@@ -344,6 +349,253 @@ public static class SettingsAutoFix
         }
         Log.Ok($"plugin-fix: {changed} entr{(changed == 1 ? "y" : "ies")} updated in {customKey}");
         return true;
+    }
+
+    // ============================================================================
+    // Bootstrap — create a minimal Settings.json when it doesn't exist on disk
+    // ============================================================================
+    //
+    // CAUSE this fixes (the "sometimes no auto plugin" bug):
+    //
+    // PureRAT ships its data inside data.pak (custom PPAK format). The panel
+    // extracts data files (Settings.json, GeoIP.mmdb) at startup. PureCrack's
+    // SettingsAutoFix runs BEFORE the panel starts — on a fresh deployment,
+    // Settings.json is still inside data.pak and FindSettingsJson() returns
+    // null. The entire IPs reorder + plugin fix chain gets skipped.
+    //
+    // On a second run the file may already be extracted → "sometimes works."
+    //
+    // This method creates a minimal but valid Settings.json at the canonical
+    // v4.0.9596+ location (panel/data/Settings.json) seeded with the correct
+    // CustomPlugins entries and loopback-first IPs, so the panel finds valid
+    // plugin paths on its very first launch. The panel may enrich the file
+    // with additional fields later; all we care about is that CustomPlugins
+    // and IPs are correct before the panel process exists.
+
+    /// <summary>
+    /// Create a minimal Settings.json at <c>panel/data/Settings.json</c> when
+    /// one isn't already on disk. Returns the path on success, null when
+    /// there are no plugin DLLs to register (nothing to fix means nothing to
+    /// create). The file is written atomically — a crash mid-write won't
+    /// leave a half-built JSON behind.
+    /// </summary>
+    public static string? BootstrapSettingsJson(string panelExe)
+    {
+        var dir = Path.GetDirectoryName(panelExe);
+        if (dir == null) return null;
+
+        var pluginsDir = Path.Combine(dir, "Plugins");
+        if (!Directory.Exists(pluginsDir)) return null;
+
+        // Discover panel plugin DLLs (same logic as FixPluginPaths).
+        var pluginNames = new List<string>();
+        foreach (var dll in Directory.GetFiles(pluginsDir, "*.dll"))
+        {
+            var name = Path.GetFileNameWithoutExtension(dll);
+            if (name.EndsWith(".Client", StringComparison.OrdinalIgnoreCase)) continue;
+            pluginNames.Add(name);
+        }
+        if (pluginNames.Count == 0) return null;
+
+        // Canonical location for v4.0.9596+ panels.
+        var targetDir = Path.Combine(dir, "data");
+        var targetPath = Path.Combine(targetDir, "Settings.json");
+
+        // Don't overwrite an existing file — the normal FixPluginPaths path
+        // already handles that.
+        if (File.Exists(targetPath)) return targetPath;
+
+        // Build the CustomPlugins array.
+        var pluginsArr = new JsonArray();
+        foreach (var name in pluginNames)
+        {
+            pluginsArr.Add(new JsonObject
+            {
+                ["Name"] = name,
+                ["FilePath"] = Path.GetFullPath(Path.Combine(pluginsDir, name + ".dll")),
+            });
+        }
+
+        var root = new JsonObject
+        {
+            ["IPs"] = new JsonArray { Loopback },
+            ["CustomPlugins"] = pluginsArr,
+        };
+
+        try { Directory.CreateDirectory(targetDir); }
+        catch (Exception ex)
+        {
+            Log.Warn($"bootstrap: can't create data dir: {ex.Message}");
+            return null;
+        }
+
+        var output = root.ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default)
+        {
+            WriteIndented = true,
+        });
+
+        try { AtomicFile.WriteAllText(targetPath, output); }
+        catch (Exception ex)
+        {
+            Log.Warn($"bootstrap: write failed: {ex.Message}");
+            return null;
+        }
+
+        Log.Ok($"bootstrap: created {targetPath} with {pluginsArr.Count} plugin(s)");
+        return targetPath;
+    }
+
+    // ============================================================================
+    // Assembly load verification — detect ".dll exists but can't load" before
+    // the panel starts. This catches the exact failure mode where PureHelper.dll
+    // is on disk but Assembly.LoadFrom fails to resolve PluginSDK (or any other
+    // dependency), which later manifests as "Sequence contains no matching
+    // element" when the operator clicks a plugin-related UI button.
+    // ============================================================================
+
+    /// <summary>
+    /// Try to load each plugin assembly and verify its dependencies resolve.
+    /// Logs a warning with the specific missing dependency when load fails.
+    /// This is a best-effort diagnostic-only step — a failure here doesn't
+    /// block the kit; it tells the operator what's broken so they can fix it.
+    /// </summary>
+    public static void VerifyPluginAssemblies(string settingsPath, string panelExe)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Collect candidate paths from both Settings.json CustomPlugins entries
+        // AND by scanning the Plugins/ directory directly (covers the case where
+        // Settings.json has no CustomPlugins at all).
+        var candidates = new List<string>();
+
+        var dir = Path.GetDirectoryName(panelExe);
+        if (dir != null)
+        {
+            var pluginsDir = Path.Combine(dir, "Plugins");
+            if (Directory.Exists(pluginsDir))
+            {
+                foreach (var dll in Directory.GetFiles(pluginsDir, "*.dll"))
+                {
+                    var name = Path.GetFileNameWithoutExtension(dll);
+                    if (name.EndsWith(".Client", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (seen.Add(Path.GetFullPath(dll)))
+                        candidates.Add(Path.GetFullPath(dll));
+                }
+            }
+        }
+
+        // Also pull FilePath entries from Settings.json (so we catch
+        // CustomPlugins paths that point outside Plugins/).
+        if (File.Exists(settingsPath))
+        {
+            try
+            {
+                var json = File.ReadAllText(settingsPath);
+                var root = JsonNode.Parse(json);
+                if (root is JsonObject obj)
+                {
+                    foreach (var kv in obj)
+                    {
+                        if (string.Equals(kv.Key, "CustomPlugins", StringComparison.OrdinalIgnoreCase)
+                            && kv.Value is JsonArray arr)
+                        {
+                            foreach (var entry in arr)
+                            {
+                                if (entry is not JsonObject entryObj) continue;
+                                var filePath = TryReadString(entryObj["FilePath"]);
+                                if (!string.IsNullOrEmpty(filePath)
+                                    && File.Exists(filePath)
+                                    && seen.Add(Path.GetFullPath(filePath)))
+                                {
+                                    candidates.Add(Path.GetFullPath(filePath));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // JSON parsing failure — already logged by FixPluginPaths.
+            }
+        }
+
+        if (candidates.Count == 0) return;
+        Log.Info($"plugin-verify: checking {candidates.Count} assembly/assemblies");
+        foreach (var path in candidates)
+        {
+            var name = Path.GetFileName(path);
+            Assembly? asm = null;
+            try
+            {
+                asm = Assembly.LoadFrom(path);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"plugin-verify: {name} — LoadFrom FAILED: {ex.Message.TrimEnd('.')}");
+                continue;
+            }
+
+            // Force dependency resolution by enumerating exported types.
+            // If PluginSDK (or any transitive dependency) is missing, the CLR
+            // will throw FileNotFoundException / FileLoadException here.
+            try
+            {
+                // GetTypes works even for internal types; GetExportedTypes only
+                // returns public types. Using GetTypes to also catch internal
+                // dependency chains.
+                var types = asm.GetTypes();
+                Log.Bullet($"plugin-verify: {name} OK ({types.Length} types)");
+            }
+            catch (Exception ex)
+            {
+                var reason = UnwrapLoadException(ex);
+                Log.Warn($"plugin-verify: {name} — dependency resolution FAILED: {reason}");
+                Log.Warn($"plugin-verify: the panel will see the same error and skip this plugin");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drill into the inner exception chain to extract the most useful error
+    /// message — usually the name of the missing assembly.
+    /// </summary>
+    private static string UnwrapLoadException(Exception ex)
+    {
+        var msg = ex.Message.TrimEnd('.');
+        // FileNotFoundException has the missing file name in FusionLog or Message.
+        if (ex is System.IO.FileNotFoundException fnf && !string.IsNullOrEmpty(fnf.FileName))
+            return $"missing dependency '{fnf.FileName}': {msg}";
+        // Recurse into inner exceptions (e.g. ReflectionTypeLoadException wraps
+        // LoaderExceptions).
+        var inner = ex.InnerException;
+        while (inner != null)
+        {
+            if (inner is System.IO.FileNotFoundException ifnf && !string.IsNullOrEmpty(ifnf.FileName))
+                return $"missing dependency '{ifnf.FileName}': {ifnf.Message.TrimEnd('.')}";
+            inner = inner.InnerException;
+        }
+        // FileLoadException usually names the assembly in the message.
+        if (ex is System.IO.FileLoadException fle)
+            return $"{msg} (likely missing assembly: {fle.FileName})";
+        // ReflectionTypeLoadException bundles multiple LoaderExceptions.
+        if (ex is System.Reflection.ReflectionTypeLoadException rtle)
+        {
+            var loaderMsgs = new List<string>();
+            foreach (var le in rtle.LoaderExceptions)
+            {
+                if (le != null)
+                {
+                    var lm = le.Message.TrimEnd('.');
+                    if (le is System.IO.FileNotFoundException lfnf && !string.IsNullOrEmpty(lfnf.FileName))
+                        lm = $"missing '{lfnf.FileName}': {lm}";
+                    loaderMsgs.Add(lm);
+                }
+            }
+            if (loaderMsgs.Count > 0)
+                return string.Join("; ", loaderMsgs);
+        }
+        return msg;
     }
 
     /// <summary>

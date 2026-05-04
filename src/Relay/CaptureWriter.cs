@@ -36,6 +36,8 @@ public static class CaptureWriter
     {
         if (!IsCapturedPath(path)) return null;
 
+        DiskGuard.WarnIfLow();
+
         var ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         var safe = SanitizePathForFilename(path);
         var prefix = Path.Combine(Workspace.CapturesDir, $"{ts}_{safe}");
@@ -51,16 +53,19 @@ public static class CaptureWriter
     }
 
     /// <summary>
-    /// True if <paramref name="path"/> matches a panel licence-API endpoint we
-    /// care about. Conservative: anything starting with <c>/api/licence/</c>
-    /// counts, so future endpoints (e.g. <c>/api/licence/release</c>) get
-    /// captured by default — we'd rather over-capture the protocol than miss
-    /// a new field. Matches the same set the relay's Route() actually services.
+    /// True if the path is a licence-API endpoint worth persisting. Excludes
+    /// /heartbeat and /update-plugins — the panel polls these every 30-60s
+    /// and capturing every ping floods the disk (~720 files/day) with
+    /// identical ACK responses. Captures the endpoints that carry actual
+    /// signal: /validate (licence check) and /compile (stub build).
     /// </summary>
     public static bool IsCapturedPath(string path)
     {
         if (string.IsNullOrEmpty(path)) return false;
-        return path.IndexOf("/api/licence/", StringComparison.OrdinalIgnoreCase) >= 0;
+        if (path.IndexOf("/api/licence/", StringComparison.OrdinalIgnoreCase) < 0) return false;
+        if (path.IndexOf("/heartbeat", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+        if (path.IndexOf("/update-plugins", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+        return true;
     }
 
     private static string BuildPrettyDump(string path, byte[] pt)

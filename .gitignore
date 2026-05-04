@@ -2,10 +2,9 @@
 bin/
 obj/
 
-# Visual Studio / Rider / VS Code
+# Visual Studio / Rider
 .vs/
 .idea/
-.vscode/
 *.user
 *.suo
 *.userprefs
@@ -19,19 +18,22 @@ packages/
 data/
 runs/
 
-# Panel binaries — not shipped in this repo.
-# See panel/README.md for how to acquire PureRAT.exe.
+# Bundled panel — large binaries / runtime state are not in git.
+# panel/README.md is tracked; everything else is bundled at install time.
 panel/PureRAT.exe
 panel/Settings.json
 panel/Settings.json.purecrack-backup
 panel/data.pak
 panel/data/
-panel/Plugins/
+# Track PluginSDK.dll so the EmbeddedResource in csproj resolves on clean clone
+panel/Plugins/*
+!panel/Plugins/PluginSDK.dll
 panel/Clients/
 panel/runs/
 
-# Claude Code
-.claude/
+# Stubs accidentally produced into project root during testing
+*.exe
+!**/bin/**/*.exe
 
 # OS
 Thumbs.db

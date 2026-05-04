@@ -20,12 +20,25 @@ public static class HostsManager
     private const string HostsPath = @"C:\Windows\System32\drivers\etc\hosts";
     private const string BackupSuffix = ".purecrack-backup";
 
-    /// <summary>Domains we redirect to loopback. Mirrors the relay's SAN cert.</summary>
+    /// <summary>
+    /// Domains we redirect to loopback. Mirrors what <c>Launch.ps1</c> set up.
+    /// Includes the geographic mirrors (<c>us./eu.</c>) on both <c>.io</c> and
+    /// <c>.su</c> TLDs that PureCoder migrated some traffic to — without these
+    /// the panel can fall through to a non-loopback DNS lookup and reach the
+    /// real upstream. The relay's TLS cert SAN list (in <c>CertManager</c>)
+    /// covers all of <c>*.purecoder.io</c>; the <c>.su</c> entries are
+    /// hosts-blocked but not cert-served, since PureLogs runs on a separate
+    /// listener with its own cert that this kit doesn't manage.
+    /// </summary>
     public static readonly string[] Domains =
     {
         "api.purecoder.io",
         "api1.purecoder.io",
         "api2.purecoder.io",
+        "us.purecoder.io",
+        "eu.purecoder.io",
+        "us.purecoder.su",
+        "eu.purecoder.su",
     };
 
     public static string Path => HostsPath;
@@ -64,7 +77,8 @@ public static class HostsManager
             newContent += $"127.0.0.1 {d}\n";
             Log.Bullet($"hosts: add 127.0.0.1 {d}");
         }
-        File.WriteAllText(HostsPath, newContent);
+        // Atomic write so a crash mid-write can't leave the OS without DNS.
+        AtomicFile.WriteAllText(HostsPath, newContent);
 
         FlushDns();
         return true;
@@ -98,7 +112,7 @@ public static class HostsManager
         }
         if (removed > 0)
         {
-            File.WriteAllText(HostsPath, string.Join("\n", kept));
+            AtomicFile.WriteAllText(HostsPath, string.Join("\n", kept));
             Log.Ok($"hosts: removed {removed} entries");
             FlushDns();
         }

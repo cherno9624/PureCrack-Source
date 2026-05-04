@@ -113,6 +113,8 @@ public sealed class RouteHandlers
 
         var pe = StubBuilder.Build(cfg);
 
+        DiskGuard.WarnIfLow();
+
         // Persist to runs/stubs/ so the operator can grab it after the panel
         // hands it off. Naming includes timestamp + first 8 of group hash for
         // disambiguation when the operator hits Build many times in a row.
