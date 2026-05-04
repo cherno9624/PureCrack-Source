@@ -110,10 +110,6 @@
       <Link>panel\Plugins\PureHelper.Client.dll</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="panel\Plugins\PluginSDK.dll">
-      <Link>panel\Plugins\PluginSDK.dll</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
   </ItemGroup>
 
 </Project>

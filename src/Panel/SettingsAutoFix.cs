@@ -445,157 +445,149 @@ public static class SettingsAutoFix
         return targetPath;
     }
 
-    // ============================================================================
-    // Assembly load verification — detect ".dll exists but can't load" before
-    // the panel starts. This catches the exact failure mode where PureHelper.dll
-    // is on disk but Assembly.LoadFrom fails to resolve PluginSDK (or any other
-    // dependency), which later manifests as "Sequence contains no matching
-    // element" when the operator clicks a plugin-related UI button.
+    // Assembly load verification — detects missing dependencies AND MOTW
+    // blocking before the panel starts. Uses only PE-metadata reads
+    // (AssemblyName.GetAssemblyName + Assembly.ReflectionOnlyLoadFrom)
+    // to avoid loading obfuscated plugin types into PureCrack's AppDomain,
+    // which would trigger module initializers and type identity conflicts.
     // ============================================================================
 
     /// <summary>
-    /// Try to load each plugin assembly and verify its dependencies resolve.
-    /// Logs a warning with the specific missing dependency when load fails.
-    /// This is a best-effort diagnostic-only step — a failure here doesn't
-    /// block the kit; it tells the operator what's broken so they can fix it.
+    /// Verify every plugin DLL under panel/Plugins/ can be loaded at the
+    /// PE-metadata level without triggering JIT or type resolution.
+    /// Performs three checks per DLL:
+    ///   1. Valid PE/CLR header (AssemblyName.GetAssemblyName).
+    ///   2. ReflectionOnlyLoad — loads metadata, does NOT execute code.
+    ///   3. Referenced assemblies probe — warns if a dependency isn't
+    ///      findable on disk (GAC, app base, Plugins/).
+    ///
+    /// This is diagnostic-only. A failure here doesn't block the kit;
+    /// it tells the operator what to fix.
     /// </summary>
     public static void VerifyPluginAssemblies(string settingsPath, string panelExe)
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var dir = Path.GetDirectoryName(panelExe);
+        if (dir == null) return;
 
-        // Collect candidate paths from both Settings.json CustomPlugins entries
-        // AND by scanning the Plugins/ directory directly (covers the case where
-        // Settings.json has no CustomPlugins at all).
+        var pluginsDir = Path.Combine(dir, "Plugins");
+        if (!Directory.Exists(pluginsDir)) return;
+
+        var appBase = dir;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var candidates = new List<string>();
 
-        var dir = Path.GetDirectoryName(panelExe);
-        if (dir != null)
+        foreach (var dll in Directory.GetFiles(pluginsDir, "*.dll"))
         {
-            var pluginsDir = Path.Combine(dir, "Plugins");
-            if (Directory.Exists(pluginsDir))
-            {
-                foreach (var dll in Directory.GetFiles(pluginsDir, "*.dll"))
-                {
-                    var name = Path.GetFileNameWithoutExtension(dll);
-                    if (name.EndsWith(".Client", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (seen.Add(Path.GetFullPath(dll)))
-                        candidates.Add(Path.GetFullPath(dll));
-                }
-            }
-        }
-
-        // Also pull FilePath entries from Settings.json (so we catch
-        // CustomPlugins paths that point outside Plugins/).
-        if (File.Exists(settingsPath))
-        {
-            try
-            {
-                var json = File.ReadAllText(settingsPath);
-                var root = JsonNode.Parse(json);
-                if (root is JsonObject obj)
-                {
-                    foreach (var kv in obj)
-                    {
-                        if (string.Equals(kv.Key, "CustomPlugins", StringComparison.OrdinalIgnoreCase)
-                            && kv.Value is JsonArray arr)
-                        {
-                            foreach (var entry in arr)
-                            {
-                                if (entry is not JsonObject entryObj) continue;
-                                var filePath = TryReadString(entryObj["FilePath"]);
-                                if (!string.IsNullOrEmpty(filePath)
-                                    && File.Exists(filePath)
-                                    && seen.Add(Path.GetFullPath(filePath)))
-                                {
-                                    candidates.Add(Path.GetFullPath(filePath));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // JSON parsing failure — already logged by FixPluginPaths.
-            }
+            var name = Path.GetFileNameWithoutExtension(dll);
+            if (name.EndsWith(".Client", StringComparison.OrdinalIgnoreCase)) continue;
+            if (seen.Add(Path.GetFullPath(dll)))
+                candidates.Add(Path.GetFullPath(dll));
         }
 
         if (candidates.Count == 0) return;
-        Log.Info($"plugin-verify: checking {candidates.Count} assembly/assemblies");
+        Log.Info($"plugin-verify: checking {candidates.Count} file(s)");
+
         foreach (var path in candidates)
         {
             var name = Path.GetFileName(path);
-            Assembly? asm = null;
+
+            // Check 1: valid PE/CLR header.
+            AssemblyName? asmName;
             try
             {
-                asm = Assembly.LoadFrom(path);
+                asmName = AssemblyName.GetAssemblyName(path);
+            }
+            catch (BadImageFormatException)
+            {
+                Log.Warn($"plugin-verify: {name} — not a valid .NET assembly");
+                continue;
             }
             catch (Exception ex)
             {
-                Log.Warn($"plugin-verify: {name} — LoadFrom FAILED: {ex.Message.TrimEnd('.')}");
+                Log.Warn($"plugin-verify: {name} — can't read PE: {ex.Message.TrimEnd('.')}");
                 continue;
             }
 
-            // Force dependency resolution by enumerating exported types.
-            // If PluginSDK (or any transitive dependency) is missing, the CLR
-            // will throw FileNotFoundException / FileLoadException here.
+            Log.Bullet($"plugin-verify: {name} = {asmName.Name} v{asmName.Version}");
+
+            // Check 2: MOTW / security block test via ReflectionOnlyLoad.
+            // Uses ReflectionOnlyLoadFrom which reads metadata without
+            // executing module initializers or resolving types.
+            Assembly? refOnly = null;
             try
             {
-                // GetTypes works even for internal types; GetExportedTypes only
-                // returns public types. Using GetTypes to also catch internal
-                // dependency chains.
-                var types = asm.GetTypes();
-                Log.Bullet($"plugin-verify: {name} OK ({types.Length} types)");
+                refOnly = Assembly.ReflectionOnlyLoadFrom(path);
             }
             catch (Exception ex)
             {
-                var reason = UnwrapLoadException(ex);
-                Log.Warn($"plugin-verify: {name} — dependency resolution FAILED: {reason}");
-                Log.Warn($"plugin-verify: the panel will see the same error and skip this plugin");
+                var motwHint = ex.Message.Contains("HRESULT")
+                            || ex.Message.Contains("80131515")
+                    ? " — MOTW (Zone.Identifier) likely blocking this file"
+                    : "";
+                Log.Warn($"plugin-verify: {name} — RefOnlyLoad failed: {ex.Message.TrimEnd('.')}{motwHint}");
             }
+
+            // Check 3: probe non-framework dependencies on disk.
+            // Uses the ReflectionOnly-loaded metadata — no type resolution.
+            if (refOnly != null)
+            {
+                try
+                {
+                    foreach (var dep in refOnly.GetReferencedAssemblies())
+                    {
+                        if (IsFrameworkAssembly(dep.Name)) continue;
+                        if (FindAssemblyOnDisk(dep, appBase, pluginsDir))
+                            Log.Bullet($"plugin-verify:   dep {dep.Name} v{dep.Version} found on disk");
+                        else
+                            Log.Info($"plugin-verify:   dep {dep.Name} v{dep.Version} — not on disk " +
+                                     $"(panel may resolve internally)");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"plugin-verify: {name} — dep scan failed: {ex.Message.TrimEnd('.')}");
+                }
+            }
+
+            if (refOnly != null)
+                Log.Bullet($"plugin-verify: {name} OK");
         }
     }
 
-    /// <summary>
-    /// Drill into the inner exception chain to extract the most useful error
-    /// message — usually the name of the missing assembly.
-    /// </summary>
-    private static string UnwrapLoadException(Exception ex)
+    private static bool IsFrameworkAssembly(string name)
     {
-        var msg = ex.Message.TrimEnd('.');
-        // FileNotFoundException has the missing file name in FusionLog or Message.
-        if (ex is System.IO.FileNotFoundException fnf && !string.IsNullOrEmpty(fnf.FileName))
-            return $"missing dependency '{fnf.FileName}': {msg}";
-        // Recurse into inner exceptions (e.g. ReflectionTypeLoadException wraps
-        // LoaderExceptions).
-        var inner = ex.InnerException;
-        while (inner != null)
+        // fast check: mscorlib and System.* are always available.
+        return string.Equals(name, "mscorlib", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("System.", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "System", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool FindAssemblyOnDisk(AssemblyName name, string appBase, string pluginsDir)
+    {
+        var simpleName = name.Name;
+        if (string.IsNullOrEmpty(simpleName)) return false;
+
+        foreach (var candidate in new[]
         {
-            if (inner is System.IO.FileNotFoundException ifnf && !string.IsNullOrEmpty(ifnf.FileName))
-                return $"missing dependency '{ifnf.FileName}': {ifnf.Message.TrimEnd('.')}";
-            inner = inner.InnerException;
-        }
-        // FileLoadException usually names the assembly in the message.
-        if (ex is System.IO.FileLoadException fle)
-            return $"{msg} (likely missing assembly: {fle.FileName})";
-        // ReflectionTypeLoadException bundles multiple LoaderExceptions.
-        if (ex is System.Reflection.ReflectionTypeLoadException rtle)
+            Path.Combine(pluginsDir, simpleName + ".dll"),
+            Path.Combine(appBase, simpleName + ".dll"),
+            Path.Combine(appBase, simpleName + ".exe"),
+        })
         {
-            var loaderMsgs = new List<string>();
-            foreach (var le in rtle.LoaderExceptions)
-            {
-                if (le != null)
-                {
-                    var lm = le.Message.TrimEnd('.');
-                    if (le is System.IO.FileNotFoundException lfnf && !string.IsNullOrEmpty(lfnf.FileName))
-                        lm = $"missing '{lfnf.FileName}': {lm}";
-                    loaderMsgs.Add(lm);
-                }
-            }
-            if (loaderMsgs.Count > 0)
-                return string.Join("; ", loaderMsgs);
+            if (File.Exists(candidate)) return true;
         }
-        return msg;
+
+        // Also probe GAC-relative locations (simplified).
+        try
+        {
+            var gacPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                "Microsoft.NET", "assembly", "GAC_MSIL", simpleName);
+            if (Directory.Exists(gacPath)) return true;
+        }
+        catch { /* best-effort */ }
+
+        return false;
     }
 
     /// <summary>
