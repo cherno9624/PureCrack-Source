@@ -1,33 +1,12 @@
 using System;
 using System.IO;
+using System.Reflection;
 using PureCrack.Util;
 
 namespace PureCrack.Provisioning;
 
-/// <summary>
-/// Orchestrates every host-environment step that <c>Launch.ps1</c> used to
-/// do, plus a couple of additions. Runs at the start of every PureCrack
-/// launch and is fully idempotent — second and subsequent invocations are
-/// no-ops where the state is already correct.
-///
-/// Order matters:
-///   1. <see cref="MotwStripper"/> — strip Zone.Identifier ADS first so any
-///      assembly we (or the panel) load later isn't blocked by MOTW.
-///   2. <see cref="NetFrameworkCrypto"/> — set strong-crypto regkeys so the
-///      panel's .NET TLS calls negotiate TLS 1.2.
-///   3. <see cref="TlsCipherSuites"/> — enable the suites the panel needs.
-///   4. <see cref="ProcessReaper"/> — kill stale panels so our launch isn't
-///      blocked by an orphaned mutex.
-///   5. <see cref="TimeSanity"/> — last, just a warning; doesn't gate.
-/// </summary>
 public static class Provision
 {
-    /// <summary>
-    /// Run the full provisioning pipeline. None of the steps are
-    /// fatal — every one is best-effort with logged warnings. The launch
-    /// keeps going even if all of them fail; preflight will still report
-    /// the resulting symptoms in a more focused way.
-    /// </summary>
     public static void Run()
     {
         Log.Section("provision");
@@ -39,25 +18,8 @@ public static class Provision
     }
 
     /// <summary>
-    /// Run after SettingsAutoFix has written files (Settings.json, backups)
-    /// and after the panel directory layout is stable. Strips MOTW from the
-    /// panel tree specifically, and deploys PluginSDK.dll if configured.
-    ///
-    /// PluginSDK strategy (tried in order, first success wins):
-    ///   1. <c>PURECRACK_PLUGINSDK=none</c>  — don't deploy, let panel resolve internally
-    ///   2. <c>PURECRACK_PLUGINSDK=path</c>  — deploy to specified file path
-    ///   3. (default) deploy to <c>panel/PluginSDK.dll</c> — application base,
-    ///      loaded at panel startup so both panel and PureHelper share the
-    ///      same ICustomPlugin type identity.
-    ///
-    /// Previous versions deployed to panel/Plugins/; we remove that copy
-    /// because Assembly.LoadFrom probes the Plugin directory first, which
-    /// loads PluginSDK AFTER the panel's internal copy, creating a type
-    /// identity mismatch that causes "No ICustomPlugin Implementation found".
-    ///
-    /// Called from DefaultCommand right before panel launch so any files
-    /// PureCrack itself creates (BootstrapSettingsJson, IPs reorder backups)
-    /// don't inadvertently carry a Zone.Identifier through a temp-file rename.
+    /// Run right before panel launch. Re-strips MOTW over the panel tree
+    /// and manages PluginSDK.dll placement.
     /// </summary>
     public static void ProvisionPanel(string panelExe)
     {
@@ -66,11 +28,6 @@ public static class Provision
         if (dir != null) MotwStripper.StripPanel(dir);
     }
 
-    /// <summary>
-    /// Inverse of <see cref="Run"/> — undo regkeys + ciphers.
-    /// MOTW strip and process reap don't have a meaningful reverse.
-    /// Used by the cleanup subcommand.
-    /// </summary>
     public static void Undo()
     {
         Log.Section("provision: undo");
@@ -79,7 +36,20 @@ public static class Provision
     }
 
     // ============================================================================
-    // PluginSDK placement — multi-fallback with type identity safety
+    // PluginSDK placement
+    // ============================================================================
+    //
+    // PureRAT's panel has PluginSDK types ILMerged into its managed assembly.
+    // Deploying an external PluginSDK.dll creates a SECOND copy of every type
+    // (same name and namespace, different assembly identity). When the panel
+    // checks PureHelper.ServerPlugin with typeof(ICustomPlugin), and both
+    // ICustomPlugin types come from different assemblies, IsAssignableFrom
+    // returns false → "No ICustomPlugin Implementation found".
+    //
+    // The default strategy is therefore: DON'T deploy PluginSDK.dll. The
+    // panel's internal AssemblyResolve handler provides PluginSDK when
+    // PureHelper.dll needs it. Only deploy from embedded if the operator
+    // sets PURECRACK_PLUGINSDK=force (last-resort fallback).
     // ============================================================================
 
     private static void FixPluginSdkPlacement(string panelExe)
@@ -88,52 +58,48 @@ public static class Provision
         if (dir == null) return;
 
         var pluginsDir = Path.Combine(dir, "Plugins");
-        var appBasePath = Path.Combine(dir, "PluginSDK.dll");
         var loadFromPath = Path.Combine(pluginsDir, "PluginSDK.dll");
+        var appBasePath = Path.Combine(dir, "PluginSDK.dll");
 
-        // Clean up any PluginSDK.dll left in Plugins/ by a previous version.
-        // It creates a type-identity conflict because Assembly.LoadFrom probes
-        // the Plugin directory first, loading a second PluginSDK copy after
-        // the panel already has one from its internal resources.
-        if (File.Exists(loadFromPath))
+        // ALWAYS clean up stale copies from previous versions.
+        // These were deployed by the old code and must go.
+        foreach (var stale in new[] { loadFromPath, appBasePath })
         {
+            if (!File.Exists(stale)) continue;
             try
             {
-                File.Delete(loadFromPath);
-                Log.Info("plugin-sdk: removed conflicting copy from panel/Plugins/");
+                File.Delete(stale);
+                Log.Info($"plugin-sdk: removed stale {Path.GetFileName(stale)} from " +
+                         $"{Path.GetDirectoryName(stale)?.Replace(dir, "panel") ?? "panel"}");
             }
             catch (Exception ex)
             {
-                Log.Warn($"plugin-sdk: can't remove {loadFromPath}: {ex.Message}");
+                Log.Warn($"plugin-sdk: can't remove {stale}: {ex.Message}");
             }
         }
 
         // Check env-var override.
         var envOverride = Environment.GetEnvironmentVariable("PURECRACK_PLUGINSDK");
-        if (!string.IsNullOrEmpty(envOverride))
+        if (string.IsNullOrEmpty(envOverride))
         {
-            if (string.Equals(envOverride, "none", StringComparison.OrdinalIgnoreCase))
-            {
-                // Operator explicitly requested no PluginSDK deployment.
-                // Also remove the app-base copy if present.
-                if (File.Exists(appBasePath))
-                {
-                    try { File.Delete(appBasePath); }
-                    catch { /* best-effort */ }
-                }
-                Log.Info("plugin-sdk: PURECRACK_PLUGINSDK=none — relying on panel internal resolution");
-                return;
-            }
-
-            // Operator specified a custom path. Deploy there.
-            DeployTo(envOverride);
+            // Default: no deployment. Panel resolves PluginSDK internally.
             return;
         }
 
-        // Default: deploy to application base (panel/PluginSDK.dll).
-        // Loaded early by the panel's own code before PureHelper loads,
-        // ensuring both share the same PluginSDK assembly identity.
-        DeployTo(appBasePath);
+        if (string.Equals(envOverride, "force", StringComparison.OrdinalIgnoreCase))
+        {
+            DeployTo(appBasePath);
+            return;
+        }
+
+        if (string.Equals(envOverride, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            // Explicit none — already cleaned above, nothing more to do.
+            return;
+        }
+
+        // Custom path.
+        DeployTo(envOverride);
     }
 
     private static void DeployTo(string target)
@@ -142,13 +108,30 @@ public static class Provision
 
         try
         {
-            var dir = Path.GetDirectoryName(target);
-            if (dir != null && !Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
+            var targetDir = Path.GetDirectoryName(target);
+            if (targetDir != null && !Directory.Exists(targetDir))
+                Directory.CreateDirectory(targetDir);
 
             var bytes = EmbeddedAssets.PluginSdkDll;
             File.WriteAllBytes(target, bytes);
             Log.Ok($"plugin-sdk: deployed to {target} ({bytes.Length:N0}b)");
+
+            // Verify the written file is a valid .NET assembly.
+            try
+            {
+                var name = AssemblyName.GetAssemblyName(target);
+                Log.Bullet($"plugin-sdk: verified {name.Name} v{name.Version}");
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"plugin-sdk: deployed but verification failed: {ex.Message.TrimEnd('.')}");
+                Log.Warn("plugin-sdk: file may be corrupt or blocked by MOTW — try re-extracting the kit");
+            }
+
+            // Strip MOTW from the newly deployed file immediately.
+            var adsPath = target + ":Zone.Identifier";
+            try { if (File.Exists(adsPath)) File.Delete(adsPath); }
+            catch { /* best-effort */ }
         }
         catch (Exception ex)
         {

@@ -478,8 +478,6 @@ public static class SettingsAutoFix
 
         foreach (var dll in Directory.GetFiles(pluginsDir, "*.dll"))
         {
-            var name = Path.GetFileNameWithoutExtension(dll);
-            if (name.EndsWith(".Client", StringComparison.OrdinalIgnoreCase)) continue;
             if (seen.Add(Path.GetFullPath(dll)))
                 candidates.Add(Path.GetFullPath(dll));
         }
