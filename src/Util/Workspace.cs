@@ -39,9 +39,16 @@ internal static class Workspace
         StubsDir    = Path.Combine(RunsDir, "stubs");
         E2eDir      = Path.Combine(RunsDir, "e2e");
 
-        Directory.CreateDirectory(DataDir);
-        Directory.CreateDirectory(CapturesDir);
-        Directory.CreateDirectory(StubsDir);
-        Directory.CreateDirectory(E2eDir);
+        foreach (var d in new[] { DataDir, CapturesDir, StubsDir, E2eDir })
+        {
+            try { Directory.CreateDirectory(d); }
+            catch (Exception ex)
+            {
+                // Disk full, ACL deny, path too long — non-fatal at init time.
+                // The code that actually needs the directory will fail later
+                // with a specific error instead of a cryptic TypeInitializationException.
+                System.Diagnostics.Debug.WriteLine($"Workspace: can't create {d}: {ex.Message}");
+            }
+        }
     }
 }

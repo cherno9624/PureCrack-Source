@@ -30,6 +30,7 @@ public sealed class TlsRelay : IDisposable
     private readonly RouteHandlers _routes;
     private readonly TcpListener _listener;
     private readonly CancellationTokenSource _cts;
+    private volatile bool _stopped;
     private readonly IPAddress _boundAddress;
     private Thread? _acceptThread;
     private int _requestCount;
@@ -99,8 +100,9 @@ public sealed class TlsRelay : IDisposable
 
     public void Stop()
     {
-        if (_cts.IsCancellationRequested) return;
-        _cts.Cancel();
+        if (_stopped) return;
+        _stopped = true;
+        try { _cts.Cancel(); } catch (ObjectDisposedException) { /* already disposed */ }
         try { _listener.Stop(); } catch { /* already stopped */ }
         _acceptThread?.Join(TimeSpan.FromSeconds(2));
         Log.Info("relay stopped");
@@ -119,38 +121,42 @@ public sealed class TlsRelay : IDisposable
 
     private void AcceptLoop()
     {
-        while (!_cts.IsCancellationRequested)
+        try
         {
-            TcpClient client;
-            try
+            while (!_stopped && !_cts.IsCancellationRequested)
             {
-                client = _listener.AcceptTcpClient();
-            }
-            catch (SocketException) when (_cts.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (ObjectDisposedException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                Log.Err($"accept: {ex.Message}");
-                continue;
-            }
+                TcpClient client;
+                try
+                {
+                    client = _listener.AcceptTcpClient();
+                }
+                catch (SocketException) when (_stopped || _cts.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Log.Err($"accept: {ex.Message}");
+                    continue;
+                }
 
-            // Hand off to ThreadPool. Each connection is short-lived (one
-            // request, then close — the panel doesn't pipeline). The lambda
-            // wraps HandleConnection in a top-level catch so any escape (e.g.
-            // ObjectDisposedException from a peer that RST'd before the work
-            // item ran) terminates the work item, not the process.
-            ThreadPool.QueueUserWorkItem(state =>
-            {
-                var c = (TcpClient)state!;
-                try { HandleConnection(c); }
-                catch (Exception ex) { Log.Err($"workitem: {ex.GetType().Name}: {ex.Message}"); }
-            }, client);
+                ThreadPool.QueueUserWorkItem(state =>
+                {
+                    var c = (TcpClient)state!;
+                    try { HandleConnection(c); }
+                    catch (Exception ex) { Log.Err($"workitem: {ex.GetType().Name}: {ex.Message}"); }
+                }, client);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Last-resort catch: AcceptLoop is a background thread. An unhandled
+            // exception here kills the process. This catch prevents that.
+            Log.Err($"relay accept loop crashed: {ex.GetType().Name}: {ex.Message}");
         }
     }
 

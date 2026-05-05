@@ -135,7 +135,11 @@ public static class DefaultCommand
             }, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
 
             var done = new ManualResetEventSlim(false);
-            Console.CancelKeyPress += (_, e) => { e.Cancel = true; done.Set(); };
+            Console.CancelKeyPress += (_, e) =>
+            {
+                try { e.Cancel = true; done.Set(); }
+                catch { /* event racing teardown — non-fatal */ }
+            };
 
             // The panel needs the operator to click Login before it binds :56001.
             // Wait up to 5 min; print READY when it comes up. Past that, leave

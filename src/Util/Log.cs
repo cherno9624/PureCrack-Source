@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 
 namespace PureCrack.Util;
@@ -15,8 +16,13 @@ internal static class Log
     // Order matters: TryEnableVirtualTerminal() must run before UseColor is
     // computed, so the success of VT-enabling feeds into the decision to emit
     // raw escape codes vs strip them.
-    private static readonly bool UseColor =
-        !Console.IsOutputRedirected && TryEnableVirtualTerminal();
+    private static readonly bool UseColor = TryResolveColorMode();
+
+    private static bool TryResolveColorMode()
+    {
+        try { return !Console.IsOutputRedirected && TryEnableVirtualTerminal(); }
+        catch { return false; } // no console, or handle is broken — fall back to plain text
+    }
 
     private const string Reset = "\x1b[0m";
     private const string Bold  = "\x1b[1m";
@@ -65,28 +71,36 @@ internal static class Log
 
     private static void Write(string s)
     {
-        if (!UseColor)
+        try
         {
-            // Strip ANSI escape sequences when redirected or VT-unsupported.
-            var i = 0;
-            while (i < s.Length)
+            if (!UseColor)
             {
-                if (s[i] == '\x1b' && i + 1 < s.Length && s[i + 1] == '[')
+                // Strip ANSI escape sequences when redirected or VT-unsupported.
+                var i = 0;
+                while (i < s.Length)
                 {
-                    var end = s.IndexOf('m', i);
-                    if (end < 0) break;
-                    i = end + 1;
-                }
-                else
-                {
-                    Console.Write(s[i]);
-                    i++;
+                    if (s[i] == '\x1b' && i + 1 < s.Length && s[i + 1] == '[')
+                    {
+                        var end = s.IndexOf('m', i);
+                        if (end < 0) break;
+                        i = end + 1;
+                    }
+                    else
+                    {
+                        Console.Write(s[i]);
+                        i++;
+                    }
                 }
             }
+            else
+            {
+                Console.Write(s);
+            }
         }
-        else
+        catch (IOException)
         {
-            Console.Write(s);
+            // Console closed, handle invalid, or redirected pipe broken.
+            // Swallow — logging to a dead console must never kill the process.
         }
     }
 
